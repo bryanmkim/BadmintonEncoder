@@ -1,0 +1,206 @@
+{
+  "image_size": [
+    1280,
+    720
+  ],
+  "court_frame": "metres; X across (+ right), Y along (-6.7 far baseline .. +6.7 near), Z up",
+  "H_court_to_image": [
+    [
+      81.66331056035068,
+      -26.627686861180432,
+      639.9112407482042
+    ],
+    [
+      -0.2534945680510517,
+      10.369771386405096,
+      403.90005395653776
+    ],
+    [
+      -0.00014336153218949248,
+      -0.041904431834831356,
+      1.0
+    ]
+  ],
+  "H_image_to_court": [
+    [
+      0.012231459483329408,
+      -8.399142600331483e-05,
+      -7.793124272644086
+    ],
+    [
+      8.76484232252411e-05,
+      0.036636180137084126,
+      -14.853442345385405
+    ],
+    [
+      5.4263781489163696e-06,
+      0.001535206272103522,
+      0.3764577034889304
+    ]
+  ],
+  "camera": {
+    "K": [
+      [
+        1854.0277120720302,
+        0.0,
+        640.0
+      ],
+      [
+        0.0,
+        1854.0277120720302,
+        360.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "R": [
+      [
+        0.999994358841062,
+        8.726810735139651e-06,
+        -0.003358900102141166
+      ],
+      [
+        -0.0031946468584764906,
+        0.31136578583577623,
+        -0.9502847687100531
+      ],
+      [
+        -0.0010375536145259098,
+        -0.9502901385022956,
+        -0.31136405725096894
+      ]
+    ],
+    "t": [
+      -0.0010856616136409214,
+      0.5369649073549815,
+      22.677598975890692
+    ],
+    "focal_px": 1854.0,
+    "center_m": [
+      0.03,
+      21.38,
+      7.57
+    ]
+  },
+  "line_errors": {
+    "far baseline": {
+      "visible": true,
+      "mean_px": 3.4,
+      "max_px": 3.95,
+      "support_px": 395,
+      "band_px": 5.8
+    },
+    "far long service": {
+      "visible": true,
+      "mean_px": 0.92,
+      "max_px": 1.43,
+      "support_px": 104,
+      "band_px": 5.8
+    },
+    "far short service": {
+      "visible": true,
+      "mean_px": 0.73,
+      "max_px": 0.93,
+      "support_px": 576,
+      "band_px": 12.0
+    },
+    "near short service": {
+      "visible": true,
+      "mean_px": 0.96,
+      "max_px": 1.2,
+      "support_px": 762,
+      "band_px": 12.0
+    },
+    "near long service": {
+      "visible": true,
+      "mean_px": 0.61,
+      "max_px": 1.28,
+      "support_px": 1400,
+      "band_px": 12.0
+    },
+    "near baseline": {
+      "visible": true,
+      "mean_px": 0.48,
+      "max_px": 0.51,
+      "support_px": 1236,
+      "band_px": 12.0
+    },
+    "left doubles sideline": {
+      "visible": true,
+      "mean_px": 0.69,
+      "max_px": 1.71,
+      "support_px": 1254,
+      "band_px": 12.0
+    },
+    "left singles sideline": {
+      "visible": true,
+      "mean_px": 0.71,
+      "max_px": 1.43,
+      "support_px": 1301,
+      "band_px": 12.0
+    },
+    "right singles sideline": {
+      "visible": true,
+      "mean_px": 0.7,
+      "max_px": 1.4,
+      "support_px": 1339,
+      "band_px": 12.0
+    },
+    "right doubles sideline": {
+      "visible": true,
+      "mean_px": 0.69,
+      "max_px": 1.71,
+      "support_px": 1266,
+      "band_px": 12.0
+    },
+    "far centre line": {
+      "visible": true,
+      "mean_px": 0.19,
+      "max_px": 0.41,
+      "support_px": 257,
+      "band_px": 12.0
+    },
+    "near centre line": {
+      "visible": true,
+      "mean_px": 0.11,
+      "max_px": 0.23,
+      "support_px": 745,
+      "band_px": 12.0
+    }
+  },
+  "lines_visible": 12,
+  "max_error_px": 3.95,
+  "stability": [
+    {
+      "from_s": 351.133,
+      "to_s": 1240.667,
+      "lines_visible": 12,
+      "max_px": 4.8
+    },
+    {
+      "from_s": 1260.867,
+      "to_s": 2536.467,
+      "lines_visible": 12,
+      "max_px": 4.67
+    },
+    {
+      "from_s": 2576.933,
+      "to_s": 3609.7,
+      "lines_visible": 12,
+      "max_px": 4.71
+    },
+    {
+      "from_s": 3632.067,
+      "to_s": 4697.4,
+      "lines_visible": 12,
+      "max_px": 4.05
+    }
+  ],
+  "gate_px": 10.0,
+  "passed": true,
+  "method": "auto",
+  "calibrated_at": "2026-09-10T20:50:32+00:00"
+}
