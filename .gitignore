@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+pipeline/.venv/
+
+# Build output
+dist/
+
+# Pipeline data: copyrighted broadcast clips, Colab zips and derived files, rebuilt from pipeline/matches.csv
+data/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

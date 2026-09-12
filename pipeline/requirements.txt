@@ -2,3 +2,5 @@ yt-dlp[default]
 opencv-python-headless
 numpy
 matplotlib
+scipy
+ultralytics   # 1E pose; pulls in PyTorch

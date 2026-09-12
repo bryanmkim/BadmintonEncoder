@@ -1,6 +1,9 @@
-match_id,youtube_id,event,round,discipline,player_a,player_b
-wc2025-ms-f-shi-vs-vitidsarn,KgH2FQwZXG0,BWF World Championships 2025,F,MS,Shi Yu Qi,Kunlavut Vitidsarn
-wc2025-ws-f-chen-vs-yamaguchi,DJvvstCZnN8,BWF World Championships 2025,F,WS,Chen Yu Fei,Akane Yamaguchi
-wtf2025-ms-f-popov-vs-shi,mMp8XfBXde4,HSBC BWF World Tour Finals 2025,F,MS,Christo Popov,Shi Yu Qi
-ae2025-ws-f-an-vs-wang,XOmknKbM0Jw,YONEX All England Open 2025,F,WS,An Se Young,Wang Zhi Yi
-do2025-ms-f-shi-vs-christie,d0I54LGlfOM,VICTOR Denmark Open 2025,F,MS,Shi Yu Qi,Jonatan Christie
+match_id,youtube_id,event,round,discipline,player_a,player_b,shuttleset_id
+wc2025-ms-f-shi-vs-vitidsarn,KgH2FQwZXG0,BWF World Championships 2025,F,MS,Shi Yu Qi,Kunlavut Vitidsarn,
+wc2025-ws-f-chen-vs-yamaguchi,DJvvstCZnN8,BWF World Championships 2025,F,WS,Chen Yu Fei,Akane Yamaguchi,
+wtf2025-ms-f-popov-vs-shi,mMp8XfBXde4,HSBC BWF World Tour Finals 2025,F,MS,Christo Popov,Shi Yu Qi,
+ae2025-ws-f-an-vs-wang,XOmknKbM0Jw,YONEX All England Open 2025,F,WS,An Se Young,Wang Zhi Yi,
+do2025-ms-f-shi-vs-christie,d0I54LGlfOM,VICTOR Denmark Open 2025,F,MS,Shi Yu Qi,Jonatan Christie,
+yto2021-ms-f-axelsen-vs-ng,IuXmsimDOW8,YONEX Thailand Open 2021,F,MS,Viktor Axelsen,Ng Ka Long Angus,Viktor_Axelsen_Ng_Ka_Long_Angus_YONEX_Thailand_Open_2021_Finals
+tto2021-ws-sf-marin-vs-an,XmJ-OdVFQtk,TOYOTA Thailand Open 2021,SF,WS,Carolina Marin,An Se Young,Carolina_Marin_An_Se_Young_TOYOTA_THAILAND_OPEN_2021_SemiFinals
+wtf2020-ms-f-antonsen-vs-axelsen,j7_cjmJDYNU,HSBC BWF World Tour Finals 2020,F,MS,Anders Antonsen,Viktor Axelsen,Anders_Antonsen_Viktor_Axelsen_HSBC_BWF_WORLD_TOUR_FINALS_2020_Finals
