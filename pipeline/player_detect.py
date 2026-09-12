@@ -27,7 +27,7 @@ CONF = 0.25           # person detections below this are ignored
 KP_CONF = 0.3         # keypoints below this aren't used
 WINDOW = 1            # frames either side of a contact also posed; a player's position is the median over them
 BATCH = 8
-L_WRIST, R_WRIST, L_ANKLE, R_ANKLE = 9, 10, 15, 16
+L_SHOULDER, R_SHOULDER, L_WRIST, R_WRIST, L_HIP, R_HIP, L_ANKLE, R_ANKLE = 5, 6, 9, 10, 11, 12, 15, 16  # COCO keypoints
 ON_COURT = (court.HALF_W + 1.2, court.HALF_L + 1.5)  # m, |X| and |Y|: a player chasing a wide or deep shot
                                                      # steps off the court; the officials sit further out
 KINDS = ("hit", "landing")
@@ -69,8 +69,28 @@ def people(result, H):
         wrists = wrists[wrists[:, 2] >= KP_CONF][:, :2]
         X, Y = court.apply_h(H, [feet])[0]
         out.append({"feet": feet, "X": X, "Y": Y, "wrists": wrists, "height": max(y1 - y0, 1.0),
-                    "top": np.array([(x0 + x1) / 2, y0])})
+                    "top": np.array([(x0 + x1) / 2, y0]), "box": np.array([x0, y0, x1, y1]),
+                    "shirt": shirt_colour(result.orig_img, kp)})
     return out
+
+
+def shirt_colour(img, kp):
+    """Median colour (Lab) inside the torso, the quadrilateral of shoulders and hips; None if any of the four
+    isn't confidently placed. 1F tells the two players apart by it."""
+    corners = kp[[L_SHOULDER, R_SHOULDER, R_HIP, L_HIP]]
+    if (corners[:, 2] < KP_CONF).any():
+        return None
+    poly = corners[:, :2].astype(np.int32)
+    x0, y0 = np.maximum(poly.min(0), 0)
+    x1, y1 = poly.max(0) + 1
+    patch = img[y0:y1, x0:x1]
+    if patch.size == 0:
+        return None
+    mask = np.zeros(patch.shape[:2], np.uint8)
+    cv2.fillConvexPoly(mask, poly - [x0, y0], 1)
+    if mask.sum() < 30:
+        return None
+    return np.median(cv2.cvtColor(patch, cv2.COLOR_BGR2LAB)[mask.astype(bool)], axis=0)
 
 
 def players(result, H):

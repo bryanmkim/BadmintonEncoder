@@ -56,7 +56,7 @@ LABEL_LAG = 1              # frames ShuttleSet's hit frames run behind 1D's. Det
 EDGE = 5                   # frames: a labelled hit this close to a clip's start or end can't show as a turn
 TOLERANCES = (1, 2, 3, 5)  # frames; ±2 is the CoachAI challenge's rule
 
-EVENT_FIELDS = ["frame", "kind", "x_px", "y_px", "floor_x_m", "floor_y_m", "speed_in", "speed_out", "kink"]
+EVENT_FIELDS = ["frame", "kind", "x_px", "y_px", "floor_x_m", "floor_y_m", "speed_in", "speed_out", "vx_out", "vy_out", "kink"]
 TYPES = {  # ShuttleSet's stroke types
     "發短球": "short service", "發長球": "long service", "放小球": "net shot", "擋小球": "return net",
     "殺球": "smash", "點扣": "wrist smash", "挑球": "lob", "防守回挑": "defensive lob", "長球": "clear",
@@ -215,7 +215,7 @@ def detect_clip(t, xy, H):
                 events.append({"frame": int(frame), "kind": kind, "x_px": x, "y_px": y,
                                "floor_x_m": float(X), "floor_y_m": float(Y),
                                "speed_in": float(np.linalg.norm(v_in)), "speed_out": float(np.linalg.norm(v_out)),
-                               "kink": kink, "floor": on_floor(H, (x, y), pxy[knots[k]:])})
+                               "vx_out": float(v_out[0]), "vy_out": float(v_out[1]), "kink": kink, "floor": on_floor(H, (x, y), pxy[knots[k]:])})
     return end_rally(events), flights
 
 
@@ -285,6 +285,8 @@ def read_labels(d):
                              "type": TYPES.get(r["type"], r["type"]), "side": side,
                              "hitter_px": (float(px), float(py)) if px and py else None,
                              "opponent_px": (float(ox), float(oy)) if ox and oy else None,
+                             "player": r["player"],  # "A" or "B"
+                             "landing_px": (float(r["landing_x"]), float(r["landing_y"])) if r["landing_x"] and r["landing_y"] else None,
                              "file": clip["file"] if clip else None,
                              "frame": frame - int(clip["start_frame"]) - LABEL_LAG if clip else None})
     return hits

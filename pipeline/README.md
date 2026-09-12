@@ -220,3 +220,29 @@ Consecutive hitters alternated at only 78-88% of hits, because 1D's false hits b
 `evaluate` matches detected hits to ShuttleSet's within ±2 frames and checks the hitter against the labelled one (whose half their labelled feet are on) and our feet against the labelled feet of hitter and opponent. The gate: the right hitter at more than 95% of contacts.
 
 **Passed.** On the three ShuttleSet matches the hitter was right at 1,864 of 1,901 matched hits (98.1%): 97.8% and 97.7% on the test matches and 98.6% on the dev match. Both players were found at 98.9-100% of hits. Our feet are a median 22 px from ShuttleSet's labelled opponent and 35 px from the labelled hitter, who is usually lunging or in the air at the contact, where "the feet" is loosely defined.
+
+## 1F — Events for the annotator (`feature_assemble.py`)
+
+```bash
+.venv/bin/python feature_assemble.py assemble [--match <id>]   # -> data/events.json, strips, identity check sheets
+.venv/bin/python feature_assemble.py validate                  # events.json against the annotator's event shape
+.venv/bin/python feature_assemble.py evaluate                  # identity, landing and shot numbers vs ShuttleSet
+.venv/bin/python feature_assemble.py swap --match <id>         # the match's two names are the wrong way round
+```
+
+Each clip with at least 2 hits is a rally; each hit becomes one event in the shape `badminton-annotator.jsx` reads (see the root `CLAUDE.md`), with `claude_label: null` until 1G. Run `npm run dev` at the repo root and the annotator loads `/data/events.json`.
+
+- **Who hit it.** 1E gives near or far, but players change ends between games. Their shirts don't change, so each clip's near and far shirt colour (median Lab inside the shoulders-hips quadrilateral, over 4 posed hits) is clustered into two players per match. The names go to the clusters in the match's `identity.json`, defaulting to `player_a`, `player_b` from `matches.csv`. **Check `identity_check.jpg` for each match**: a row of crops per cluster with the name it gets. If they're the wrong way round, run `swap` (on the first run, `wtf2025-ms-f-popov-vs-shi` needed it; the other four were right, judged by names printed on the backs of shirts). On the ShuttleSet matches the hitter's name was right at 97.8-98.6% of matched hits, the same as 1E's near/far, so the clustering adds no errors there.
+- **Positions.** `player_xy` and `opponent_xy` are 1E's feet at the contact.
+- **Landing.** For a returned shot, ShuttleSet's landing is where the next player hits it, so `landing_xy` is the floor point below the shuttle at the next contact: straight down the screen from the shuttle to the next hitter's feet level, then onto the court. Against ShuttleSet's labelled landings that was a median 1.0-1.1 m off, against 1.4-1.5 m for the next hitter's feet and 4.2-4.8 m for the shuttle's image position taken straight onto the court (ShuttleSet's landing points are on the floor, about 100 px from the airborne shuttle). The last shot's landing is 1D's floor contact (median 0.26-0.47 m off), else the last detection that maps onto the court (a shuttle leaving the top of the frame maps up to 100 m past the far baseline, so the track is walked back from its end; still in the air, so rough). `landing_source` says which.
+- **Speed** is the average over the floor from hitter to landing, in km/h (median about 29). The launch speed of a shot moving toward or away from the camera can't be read from one view. It's left empty when the landing comes less than 0.2 s after the hit or the average would exceed 300 km/h: both are 1D pairing a false hit with a landing.
+- **Angle** is the launch direction on screen from 1D's outgoing velocity, degrees above horizontal.
+- **Frames.** `frames` is one JPEG per event: frames f-2 to f+2, each 320x180, cropped 16:9 on the hitter (feet to 1.8 m above them, from the 1B camera) and the shuttle, with the shuttle ringed on the contact frame. They're in `segments/<match_id>/strips/`, and kept between runs.
+
+The ShuttleSet matches are left out of `events.json`: ShuttleSet is the predictor's training data and holds its 1I test set, so labelling them again would leak into that test. `evaluate` builds their events in memory instead.
+
+### Known limits
+
+- **Shot numbers are often off.** `shot_num` counts 1D's hits in the clip, which matched ShuttleSet's `ball_round` at only 20-39% of hits. The serve is usually missing (shown on a close-up before the clip starts), which pulls numbers down, and 1D's missed and extra hits shift the rest. The predictor trains on whole rallies from the serve, so rallies should be checked before export, or only those whose first event is a serve kept.
+- About 14% of returned shots land on the hitter's own half. That matches the rate at which consecutive hitters fail to alternate: it's 1D's false hits, not the landing estimate.
+- The annotator finds the strips through the dev server, which serves the repo root. With `BADMINTON_DATA_DIR` pointing outside the repo, the strip URLs won't resolve.
