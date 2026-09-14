@@ -28,7 +28,7 @@ Each sub-phase has a stop-and-check gate. If a gate fails, you fix it before mov
 
 ---
 
-## Phase 1C — Shuttle Tracking
+## Phase 1C — Shuttle Tracking(COMPLETED)
 
 **Build:** run TrackNetV3 per segment, interpolate short gaps, apply Savitzky-Golay smoothing, convert to court coordinates.
 
@@ -40,7 +40,9 @@ Each sub-phase has a stop-and-check gate. If a gate fails, you fix it before mov
 
 ---
 
-## Phase 1D — Contact-Frame Detection
+## Phase 1D — Contact-Frame Detection(BUILT, GATE NOT MET — MOVED ON)
+
+Status: on the ShuttleSet test matches, recall 79-84% and precision 83-84% at ±2 frames (dev match 90.1% / 86.4%). Chose to continue to 1E/1F; details in `pipeline/README.md`.
 
 This is the one that decides whether the whole approach works. Do it on **one rally** before scaling.
 
@@ -56,7 +58,7 @@ This is the one that decides whether the whole approach works. Do it on **one ra
 
 ---
 
-## Phase 1E — Player Detection
+## Phase 1E — Player Detection(COMPLETED — gate passed, right hitter at 98.1%)
 
 **Build:** YOLOv8-pose per frame, assign detections to near/far player by court y-coordinate, extract player position at each contact frame.
 
@@ -68,7 +70,7 @@ This is the one that decides whether the whole approach works. Do it on **one ra
 
 ---
 
-## Phase 1F — Feature Assembly
+## Phase 1F — Feature Assembly(BUILT — JSON validates; UI check pending)
 
 **Build:** for each contact, assemble the event object the annotator expects — match, rally, shot number, player xy, landing xy, speed, trajectory angle, plus a 5-frame image strip around contact.
 
@@ -80,9 +82,21 @@ Landing position = the shuttle's court position at the *next* contact frame, or 
 
 ---
 
-## Phase 1G — Claude Vision Labeling
+## Phase 1G — Shot-Type Suggestions(BUILT AS A SHUTTLESET CLASSIFIER — GATE NOT MET)
 
-**Build:** send each contact's frame strip plus trajectory summary to the Claude Batch API. Prompt for shot type, hitting player, confidence, and reasoning as JSON.
+Status: built as `pipeline/shot_classify.py` instead of Claude vision labelling. Every exported shot is reviewed by hand, so a suggestion only has to make review faster. A model trained on ShuttleSet's own labels (the predictor's `og_train.csv`, 29,494 shots) learns exactly the predictor's 10 types and ShuttleSet's conventions for them (lob or clear, push/rush or drive), costs nothing per match, and can be graded automatically on the ShuttleSet matches. It uses where the hitter, opponent and landing are, the times to and from the neighbouring hits, and the speeds those imply. Graded against ShuttleSet's labels on the pipeline's own events (1D-1F output matched to ShuttleSet's hits, ~2,000 events on the three ShuttleSet matches, replacing the 100 hand-labelled ones):
+
+| Match | Top-1 | Top-3 | Confident (p ≥ 0.7) |
+|---|---|---|---|
+| yto2021 (dev) | 69.4% | 94.0% | 64% of shots, 82.3% right |
+| tto2021 (test) | 73.6% | 92.0% | 73% of shots, 85.7% right |
+| wtf2020 (test) | 68.7% | 92.0% | 65% of shots, 82.0% right |
+
+A returned shot's landing on the hitter's own half is never used: it's a wrong landing or a false hit (18% of the pipeline's returned shots). The annotator flags those shots, and the export leaves them out until they're fixed.
+
+Short of the 75% gate. Given ShuttleSet's own positions and timings instead of the pipeline's, the same model gets 81-87%, so most of the gap is 1D-1F's measurement error (landings a median 1 m off, missed and false hits). The weakest types are drive, push/rush against lob, and a net shot against a blocked smash (a "defensive shot"). If review is still slow, the fallback is Claude vision on just the uncertain events of those types. Details in `pipeline/README.md`.
+
+**Build (original plan):** send each contact's frame strip plus trajectory summary to the Claude Batch API. Prompt for shot type, hitting player, confidence, and reasoning as JSON.
 
 **Effort:** 1-2 days including prompt iteration.
 
@@ -97,6 +111,8 @@ Landing position = the shuttle's court position at the *next* contact frame, or 
 **Effort:** 3-5 hours of review for ~2,000 shots from 5 matches.
 
 **Gate:** confirm-rate above 80%. Note which shot types you override most — that's your Phase 2 prompt-improvement list.
+
+Note: a pre-filled answer tends to get accepted, so the confirm rate partly measures that. 1G's agreement with ShuttleSet is the accuracy check.
 
 ---
 

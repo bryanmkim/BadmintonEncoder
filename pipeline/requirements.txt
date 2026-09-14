@@ -4,3 +4,4 @@ numpy
 matplotlib
 scipy
 ultralytics   # 1E pose; pulls in PyTorch
+scikit-learn  # shot_classify.py's gradient-boosted trees

@@ -2,11 +2,13 @@
 
 One event per hit 1D found, in the shape badminton-annotator.jsx reads: the match, its two players, rally and
 shot number, time in the broadcast, and `cv` measurements from 1D and 1E (both players' court positions,
-where the shot went, its average speed and launch angle), plus a 5-frame strip around the contact, cropped
-on the hitter and the shuttle.
+where the shot went, its average speed and launch angle, the seconds from the previous hit and to the
+landing), plus a 5-frame strip around the contact, cropped on the hitter and the shuttle.
 
 Which named player hit each shot: 1E knows near or far, but players change ends between games. Their shirts
-don't change, so the two are told apart by shirt colour, clustered per match. The names go to the clusters
+don't change, so the two are told apart by shirt colour, clustered per match, and which half each is on is
+chosen for the whole match at once: ends change at most 3 times, at breaks long enough for a game interval.
+The names go to the clusters
 in the match's identity.json; identity_check.jpg shows each cluster, and `swap` flips the names if they're
 the wrong way round.
 
@@ -36,6 +38,9 @@ EVENTS_JSON = DATA_DIR / "events.json"
 MIN_RALLY_HITS = 2         # a clip with fewer hits is a pick-up or a lone serve, not a rally
 STRIP = (-2, -1, 0, 1, 2)  # frames around the contact, as the annotator's FrameStrip lays them out
 TILE = (320, 180)          # px per frame in a strip
+AFTER = (15, 30, 45)       # frames after a clip's last hit in its after strip (0.5, 1 and 1.5 s): with no next hit to
+                           # show where the last shot went, where the shuttle and players go next tells what it was
+AFTER_HEADROOM = 3.0       # m above the court the after strip keeps in view: the far player's full height and the dropping shuttle
 PLAYER_H = 1.8             # m: room left above the hitter's feet in the crop
 CROP_PAD = 1.35            # crop size over the box holding the hitter and the shuttle
 MIN_CROP_W = 240           # px at 720p: the far player is ~60 px tall and a tighter crop is mostly blur
@@ -46,6 +51,11 @@ MAX_SPEED_KMH = 300        # an average over the whole flight above this isn't a
 KMEANS = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.1)
 OTHER = {"near": "far", "far": "near"}
 TOL = 2                    # frames, when matching events to ShuttleSet's hits
+# Players change ends between games and at 11 in the third, never otherwise
+MAX_END_CHANGES = 3        # per match (singles, best of three)
+MIN_BREAK_S = 45           # s between rally clips that an end change needs. On the 7 matches whose shirt calls ran cleanly,
+                           # every change came at a gap of 53-134 s (2 min between games, 1 min at 11); the median gap is 16-26 s
+SWITCH_COST = 2.0          # clips' worth of shirt evidence (the median per-clip margin) a change has to outweigh
 
 
 def read_csv(path):
@@ -89,44 +99,75 @@ def shirts(model, device, d, H, clips):
 
 
 def identify(colours, known=None):
-    """Two clusters of shirt colour, one per player, and for each clip the cluster on the near half.
-    `known` centres from an earlier run keep cluster 0 the same player from run to run."""
+    """Two clusters of shirt colour, one per player, and for each clip the colour distance (cost) of cluster 0
+    or of cluster 1 being on the near half. `known` centres from an earlier run keep cluster 0 the same player
+    from run to run."""
     X = np.float32([c for pair in colours.values() for c in pair])
     _, _, centres = cv2.kmeans(X, 2, None, KMEANS, 5, cv2.KMEANS_PP_CENTERS)
     if known is not None:
         same = np.linalg.norm(centres - known, axis=1).sum()
         if np.linalg.norm(centres[::-1] - known, axis=1).sum() < same:
             centres = centres[::-1]
-    near = {}
-    for f, (cn, cf) in colours.items():
-        stay = np.linalg.norm(cn - centres[0]) + np.linalg.norm(cf - centres[1])
-        swap = np.linalg.norm(cn - centres[1]) + np.linalg.norm(cf - centres[0])
-        near[f] = 0 if stay <= swap else 1
-    return centres, near
+    cost = {f: (np.linalg.norm(cn - centres[0]) + np.linalg.norm(cf - centres[1]),
+                np.linalg.norm(cn - centres[1]) + np.linalg.norm(cf - centres[0])) for f, (cn, cf) in colours.items()}
+    return centres, cost
+
+
+def change_ends(clips, cost, fps):
+    """Per clip, the cluster on the near half, chosen for the whole match at once. Taken clip by clip, similar
+    shirts (Shi Yu Qi's red and Vitidsarn's pink at the 2025 Worlds) flipped the names 17 times in one match.
+    Players change ends at most MAX_END_CHANGES times, each at a break of at least MIN_BREAK_S, so this finds
+    the runs that best fit the clips' colours, each change costing SWITCH_COST clips' worth of evidence. A clip
+    without both shirts is no evidence either way."""
+    rows = [row for row, *_ in clips]
+    c = np.array([cost.get(r["file"], (0.0, 0.0)) for r in rows], float)
+    seen = c.any(1)
+    penalty = SWITCH_COST * (np.median(np.abs(c[seen, 0] - c[seen, 1])) if seen.any() else 1.0)
+    brk = [False] + [(int(b["start_frame"]) - int(a["end_frame"])) / fps >= MIN_BREAK_S for a, b in zip(rows, rows[1:])]
+    # Dynamic programming over (changes so far, cluster near) -> (total cost, previous state)
+    trail = [{(0, s): (c[0, s], None) for s in (0, 1)}]
+    for i in range(1, len(rows)):
+        cur = {}
+        for (k, s), (v, _) in trail[-1].items():
+            for s2 in (0, 1):
+                k2 = k + (s2 != s)
+                if s2 != s and (not brk[i] or k2 > MAX_END_CHANGES):
+                    continue
+                v2 = v + c[i, s2] + (penalty if s2 != s else 0.0)
+                if v2 < cur.get((k2, s2), (np.inf,))[0]:
+                    cur[(k2, s2)] = (v2, (k, s))
+        trail.append(cur)
+    state, out = min(trail[-1], key=lambda st: trail[-1][st][0]), []
+    for i in range(len(rows) - 1, -1, -1):
+        out.append(state[1])
+        state = trail[i][state][1]
+    return dict(zip([r["file"] for r in rows], out[::-1]))
 
 
 def identity(d, clips, get_model, meta, reidentify=False):
-    """The match's identity.json, made (posing a few frames per clip) if it's missing or out of date."""
+    """The match's identity.json: its two names, their shirt clusters and, per clip, the cluster on the near
+    half. Shirts are posed (a few frames per clip) when identity.json has none for some clip, or with
+    reidentify; otherwise they're read back from it, so changing the end-change rules needs no posing."""
     path = d / "identity.json"
     old = json.loads(path.read_text()) if path.exists() else None
     files = [row["file"] for row, *_ in clips]
-    if old and not reidentify and all(f in old["near_cluster"] for f in files):
-        return old
-    model, device = get_model()
-    colours, crops = shirts(model, device, d, image_to_court(d), clips)
-    centres, near = identify(colours, np.array(old["centres"]) if old else None)
-    # A clip where a shirt wasn't seen keeps the previous clip's ends: players change ends only between games
-    filled, last = {}, None
-    for f in files:
-        last = near.get(f, last)
-        filled[f] = last
-    first = next((v for v in filled.values() if v is not None), 0)
+    crops = None
+    if old and "shirts" in old and not reidentify and all(f in old["near_cluster"] for f in files):
+        colours = {f: np.array(v) for f, v in old["shirts"].items() if f in files}
+    else:
+        model, device = get_model()
+        colours, crops = shirts(model, device, d, image_to_court(d), clips)
+    centres, cost = identify(colours, np.array(old["centres"]) if old else None)
+    near = change_ends(clips, cost, json.loads((d / "match.json").read_text())["fps"])
     ident = {"names": old["names"] if old else [meta["player_a"], meta["player_b"]],
              "centres": centres.tolist(),
-             "near_cluster": {f: first if v is None else v for f, v in filled.items()},
-             "clips_with_both_shirts": len(colours), "clips": len(files)}
+             "near_cluster": near,
+             "end_changes": [f for f, g in zip(files[1:], files) if near[f] != near[g]],
+             "clips_with_both_shirts": len(colours), "clips": len(files),
+             "shirts": {f: np.asarray(v).tolist() for f, v in colours.items()}}
     path.write_text(json.dumps(ident, indent=1))
-    check_sheet(d, ident, crops)
+    if crops is not None:
+        check_sheet(d, ident, crops)
     return ident
 
 
@@ -232,6 +273,7 @@ def match_events(d, meta, ident, H, cam, fps, clips):
                 speed = None
             angle = (round(float(np.degrees(np.arctan2(-float(e["vy_out"]), abs(float(e["vx_out"]))))))
                      if e.get("vx_out") else None)
+            since_prev = round((f - frames[i - 1]) / fps, 2) if i else None
             to01 = lambda xy: [round(float(v), 4) for v in court.to_normalized([xy])[0]]
             events.append({
                 "id": f"{d.name}:{int(row['segment_id']):04d}:{f}",
@@ -243,7 +285,8 @@ def match_events(d, meta, ident, H, cam, fps, clips):
                 "cv": {"player_xy": to01(me), "opponent_xy": to01(opp), "landing_xy": to01(land),
                        "speed": None if speed is None else int(round(speed)), "trajectory_angle": angle,
                        "hitting_player": [meta["player_a"], meta["player_b"]].index(names[cluster]) + 1,
-                       "hitter_side": side, "landing_source": source},
+                       "hitter_side": side, "landing_source": source,
+                       "flight_s": round(flight, 2), "since_prev_s": since_prev},
                 "frames": None,
                 "source": {"match_id": d.name, "segment": int(row["segment_id"]), "clip": row["file"], "frame": f},
                 "claude_label": None,
@@ -282,6 +325,50 @@ def write_strips(d, events):
             ev["frames"] = "/" + str(path(ev).relative_to(DATA_DIR.parent))
 
 
+def court_box(cam, size=(1280, 720)):
+    """A 16:9 box on screen holding the court floor and everything up to AFTER_HEADROOM above it, from the 1B
+    camera. Sized from the floor corners alone, it cut the far player off at the waist."""
+    floor = [[x, y, 0.0] for x, y in court.CORNERS]
+    raised = [[x, y, AFTER_HEADROOM] for x, y in court.CORNERS]
+    pts = court.project(cam["K"], cam["R"], cam["t"], floor + raised)
+    (x0, y0), (x1, y1) = pts.min(0), pts.max(0)
+    w = min(max(x1 - x0, (y1 - y0) * 16 / 9) * 1.05, size[0], size[1] * 16 / 9)
+    h = w * 9 / 16
+    x = np.clip((x0 + x1) / 2 - w / 2, 0, size[0] - w)
+    y = np.clip((y0 + y1) / 2 - h / 2, 0, size[1] - h)
+    return int(x), int(y), int(w), int(h)
+
+
+def write_after(d, events, cam):
+    """For each clip's last event, one JPEG of the AFTER frames around the whole court, the shuttle ringed where
+    1C tracked it. Existing ones are kept."""
+    last = {}
+    for ev in events:
+        c = ev["source"]["clip"]
+        if c not in last or ev["source"]["frame"] > last[c]["source"]["frame"]:
+            last[c] = ev
+    x, y, w, h = court_box(cam)
+    for clip, ev in last.items():
+        f = ev["source"]["frame"]
+        path = d / "strips" / f"{clip[:-4]}_f{f:05d}_after.jpg"
+        if not path.exists():
+            frames = clip_frames(d / clip, {f + o for o in AFTER})
+            track = {int(r["frame"]): r for r in read_csv(d / "tracks" / clip.replace(".mp4", ".csv")) if r["detected"] == "1"}
+            tiles = []
+            for o in AFTER:
+                img = frames.get(f + o)
+                if img is None:  # the clip ends first: the broadcast cut away
+                    tiles.append(label(np.zeros((TILE[1], TILE[0], 3), np.uint8), "clip has ended"))
+                    continue
+                img = img.copy()
+                if f + o in track:
+                    r = track[f + o]
+                    cv2.circle(img, (int(float(r["raw_x_px"])), int(float(r["raw_y_px"]))), 16, (0, 0, 255), 3, cv2.LINE_AA)
+                tiles.append(label(cv2.resize(img[y:y + h, x:x + w], TILE, interpolation=cv2.INTER_AREA), f"+{o / 30:.1f} s"))
+            cv2.imwrite(str(path), np.hstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 85])
+        ev["frames_after"] = "/" + str(path.relative_to(DATA_DIR.parent))
+
+
 def build(d, meta, get_model, reidentify=False, strips=True):
     clips = match_clips(d)
     ident = identity(d, clips, get_model, meta, reidentify)
@@ -290,6 +377,7 @@ def build(d, meta, get_model, reidentify=False, strips=True):
     events = match_events(d, meta, ident, image_to_court(d), cam, fps, clips)
     if strips:
         write_strips(d, events)
+        write_after(d, events, cam)
     for ev in events:
         ev.pop("_crop")
     return events, ident
@@ -313,6 +401,7 @@ def assemble(match=None, reidentify=False):
         sources = Counter(e["cv"]["landing_source"] for e in events)
         log(f"{d.name:32s} {len(events):5d} events in {len({e['rally'] for e in events})} rallies  "
             f"landing from {dict(sources)}  both shirts seen in {ident['clips_with_both_shirts']}/{ident['clips']} clips  "
+            f"ends change before {', '.join(ident['end_changes']) or 'none'}  "
             f"-> check {d.name}/identity_check.jpg")
     EVENTS_JSON.write_text(json.dumps(out))
     log(f"{len(out)} events -> {EVENTS_JSON}")
@@ -356,8 +445,9 @@ def validate():
             wrong["cv.trajectory_angle outside -90..90"] += 1
         if cv_.get("hitting_player") not in (1, 2):
             wrong["cv.hitting_player not 1 or 2"] += 1
-        if e.get("frames") and not (DATA_DIR.parent / e["frames"].lstrip("/")).exists():
-            wrong["frames file missing"] += 1
+        for k in ("frames", "frames_after"):
+            if e.get(k) and not (DATA_DIR.parent / e[k].lstrip("/")).exists():
+                wrong[f"{k} file missing"] += 1
     shots = defaultdict(list)
     for e in events:
         shots[(e["match"], e["rally"])].append(e["shot_num"])

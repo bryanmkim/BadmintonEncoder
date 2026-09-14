@@ -287,6 +287,7 @@ def read_labels(d):
                              "opponent_px": (float(ox), float(oy)) if ox and oy else None,
                              "player": r["player"],  # "A" or "B"
                              "landing_px": (float(r["landing_x"]), float(r["landing_y"])) if r["landing_x"] and r["landing_y"] else None,
+                             "broadcast_frame": frame,
                              "file": clip["file"] if clip else None,
                              "frame": frame - int(clip["start_frame"]) - LABEL_LAG if clip else None})
     return hits
