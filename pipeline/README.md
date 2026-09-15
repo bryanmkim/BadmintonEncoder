@@ -1,6 +1,6 @@
 # Phase 1 pipeline
 
-Turns broadcast match videos into data for the annotator. The plan and its gates are in [../PHASE_1_README.md](../PHASE_1_README.md).
+Turns broadcast match videos into data for the annotator. The project overview is in [../README.md](../README.md).
 
 ## Setup
 
@@ -245,7 +245,7 @@ The ShuttleSet matches are left out of `events.json`: ShuttleSet is the predicto
 ### Known limits
 
 - **Shot numbers are often off.** `shot_num` counts 1D's hits in the clip, which matched ShuttleSet's `ball_round` at only 20-39% of hits. The serve is usually missing (shown on a close-up before the clip starts), which pulls numbers down, and 1D's missed and extra hits shift the rest. The predictor trains on whole rallies from the serve, so rallies should be checked before export, or only those whose first event is a serve kept.
-- About 18% of returned shots land on the hitter's own half, which a returned shot can't. It's 1D's false hits (two hits in a row on one side) or a wrong landing, and it matches the rate at which consecutive hitters fail to alternate. Such a landing is never used as real: `shot_classify.py` ignores it, and the annotator flags the shot and leaves it out of the export until the review fixes it (X on the false hit, or L). A rally's last shot can land on its own half, into the net (687 of ShuttleSet's 708 last shots that do), so there it's only flagged.
+- About 18% of returned shots land on the hitter's own half, which a returned shot can't. It's 1D's false hits (two hits in a row on one side) or a wrong landing, and it matches the rate at which consecutive hitters fail to alternate. Such a landing is never used as real: `shot_classify.py` ignores it, and the annotator flags the shot and leaves it out of the export until the review fixes it (X on the false hit, or L). Since 2026-09-15 the same goes for a rally's last shot, though in ShuttleSet 687 of the 708 last shots landing on their own half are net errors.
 - The annotator finds the strips through the dev server, which serves the repo root. With `BADMINTON_DATA_DIR` pointing outside the repo, the strip URLs won't resolve.
 
 ## 1G — Shot-type suggestions (`shot_classify.py`)
@@ -260,7 +260,7 @@ The plan was Claude vision labelling. But every exported shot is reviewed by han
 
 - **Training data.** `og_train.csv` is ShuttleSet22's training split, with its 18 types already merged into the predictor's 10. Any og_train match sharing half its hit frames with one of our ShuttleSet matches is left out: `wtf2020` is og_train's match 7 (676 of 676 frames; the next largest overlap is 14). That leaves 29,494 shots from 43 matches. Its template coordinates convert to court metres within a median 0.07 m of ShuttleSet's raw pixels mapped through our `court.json`. For the evaluation, ShuttleSet's 18 raw types are merged as ShuttleSet22's `preprocess_data.py` does (return net, defensive lob and defensive drive become "defensive shot", and so on).
 - **Features** are the same from ShuttleSet and from 1F: the hitter's, opponent's and landing position in metres, turned 180° when the hitter is on the far half (the same shot seen from the other end); where the previous hitter stood; the seconds since the previous hit and to the next; the outgoing average speed, distance and sideways change; and the incoming speed from the previous hitter, meant to separate a net shot from a blocked smash (it left top-1 on the dev match unchanged and top-3 up from 91.6% to 92.3%). ShuttleSet has no shuttle height or launch angle, so 1D's angle isn't used. A landing where the track ends (still in the air) is left out, as is the flight time to a floor landing: ShuttleSet times only hit to hit.
-- **No landings on the hitter's own half.** A returned shot can't land there, so such a landing is a wrong landing or a false hit, never data. It's left out along with the flight time to that hit: in training (393 of og_train's 27,904 returned shots, label noise) and on 1F's events (18% of returned shots, mostly 1D's false hits). A rally's last shot keeps its own-half landing, since in ShuttleSet those are nets (687 of 708). The rough copies hide a returned shot's landing 18% of the time to match. On the dev match's events that raised top-3 from 92.3% to 94.0% and the confident suggestions from 80.5% to 82.3% right, with top-1 about the same (68.8% to 69.4%).
+- **No landings on the hitter's own half.** A returned shot can't land there, so such a landing is a wrong landing or a false hit, never data. It's left out along with the flight time to that hit: in training (393 of og_train's 27,904 returned shots, label noise) and on 1F's events (18% of returned shots, mostly 1D's false hits). Since 2026-09-15 a rally's last shot loses its own-half landing too, though in ShuttleSet 687 of 708 of those are nets. That moved each match by under 1.5 points either way. The rough copies hide a returned shot's landing 18% of the time to match. On the dev match's events that raised top-3 from 92.3% to 94.0% and the confident suggestions from 80.5% to 82.3% right, with top-1 about the same (68.8% to 69.4%).
 - **Rough copies.** Trained on ShuttleSet's clean numbers alone, the model leaned on precision the pipeline doesn't have. It also called every rally's first detected hit a serve, but in 1F a clip often starts after the serve. So each shot is trained twice: once clean, and once with 1D-1F's measured errors added. That's 0.4 m on the feet, 0.85 m per axis on the landing (1F's landings are a median 1.0-1.1 m off), 0.05 s on the timing, and the previous hit hidden 30% of the time. On the dev match's events, that took top-1 from 61.7% to 68.9% and short-service precision from 24% to 70%. The test matches moved the same way (68.5% to 73.3%, 61.5% to 69.3%).
 - **Output.** `label` writes `model_label: { shot_type, p, top: [[type, p] × 3], source }` into each event. The annotator shows it with its probability (green at 70% and above) and the next two alternatives, and Enter confirms it. `assemble` rewrites `events.json` without it, so run `label` after.
 
@@ -268,10 +268,10 @@ The plan was Claude vision labelling. But every exported shot is reviewed by han
 
 | Match | From ShuttleSet's numbers | 1F's events: top-1 | top-3 | Suggestions at p ≥ 0.7 |
 |---|---|---|---|---|
-| og_train, 5-fold by match | 85.8% (top-3 98.4%) | | | |
-| yto2021 (dev) | 82.4% | 69.4% | 94.0% | 64% of events, 82.3% right |
-| tto2021 (test) | 87.0% | 73.6% | 92.0% | 73% of events, 85.7% right |
-| wtf2020 (test) | 80.7% | 68.7% | 92.0% | 65% of events, 82.0% right |
+| og_train, 5-fold by match | 85.7% (top-3 98.4%) | | | |
+| yto2021 (dev) | 82.7% | 68.5% | 93.5% | 64% of events, 83.3% right |
+| tto2021 (test) | 88.0% | 73.6% | 91.5% | 72% of events, 86.0% right |
+| wtf2020 (test) | 80.6% | 70.1% | 92.1% | 66% of events, 81.7% right |
 
 **Not passed:** the gate was 75% agreement, and the test matches reach 69-74%. The gap between the two columns is 1D-1F's measurement error, not the model. On the 2025 events, 60% of suggestions come with p ≥ 0.7.
 

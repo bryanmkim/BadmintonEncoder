@@ -74,9 +74,10 @@ def features(hitter, opponent, landing, prev_hitter, since_prev, flight):
     (hx, hy), (ox, oy), (lx, ly), (px, py) = turn(hitter), turn(opponent), turn(landing), turn(prev_hitter)
     since_prev = np.nan if since_prev is None else since_prev
     flight = np.nan if flight is None else flight
-    if not np.isnan(flight) and ly > 0:
-        # A returned shot can't land on the hitter's own half: the landing is wrong or the next hit is false,
-        # so neither it nor the time to that hit is used. (A rally's last shot can: into the net.)
+    if ly > 0:
+        # A landing on the hitter's own half is never used (the user's rule): the landing is wrong or a hit is
+        # false, so neither it nor the time to that hit counts. Since 2026-09-15 that includes a rally's last
+        # shot, though 687 of ShuttleSet's 708 such last shots are net errors
         lx = ly = flight = np.nan
     distance = np.hypot(lx - hx, ly - hy)
     speed = distance / flight if flight > 0 else np.nan  # a few og_train rallies repeat a hit's frame

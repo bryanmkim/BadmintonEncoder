@@ -16,7 +16,7 @@ const SHOT_COLORS = {
 // v4 added gap_before; v3 stored bare annotations and is read once as a fallback.
 const STORAGE_KEY = "annotator:review:v4";
 const LEGACY_STORAGE_KEY = "annotator:annotations:v3";
-const POSITION_KEY = "annotator:position:v1"; // { id, filter } of the event on screen, so a reload continues there
+const POSITION_KEY = "annotator:position:v1"; // { id, filter, match } of the event on screen, so a reload continues there
 const EVENTS_URL = "/data/events.json"; // written by pipeline/feature_assemble.py (Phase 1F)
 
 // === MOCK DATA (used when EVENTS_URL isn't there) ===
@@ -396,8 +396,8 @@ const MIN_PIECE_SHOTS = 5;
 // landing is where the next shot was played, which the dropped event's landing already is. A missing shot
 // (gap_before) splits the rally, and the shot before the gap is dropped too: its landing is where the shot
 // after the missing one was played, and the transition across the gap never happened.
-// A returned shot has to cross the net, so a landing on the hitter's own half means the landing is wrong or
-// the next hit was a false one. (A rally's last shot can land there: into the net.)
+// A landing on the hitter's own half is never accepted: the landing is wrong or a hit was false. That includes
+// a rally's last shot (the user's call, 2026-09-15), though in ShuttleSet most such last shots are net errors
 const onOwnHalf = (hitterXY, landingXY) => (hitterXY[1] - 0.5) * (landingXY[1] - 0.5) > 0;
 
 const rallyPieces = shots => {
@@ -417,16 +417,15 @@ const rallyPieces = shots => {
     }
     part.push(s);
   });
-  // A returned shot landing on its own half is left out, splitting the rally there, until the review fixes it
+  // A shot landing on its own half is left out, splitting the rally there, until the review fixes it
   // (L moves the landing, X on the false hit passes the landing on)
   const landingOf = s => s.landing_fix ?? landing.get(s.id) ?? s.cv.landing_xy;
-  const last = [...parts].reverse().find(p => p.length)?.at(-1);
   const out = [];
   let ownHalf = 0;
   parts.forEach(part => {
     let cur = [];
     part.forEach(s => {
-      if (s !== last && onOwnHalf(s.cv.player_xy, landingOf(s))) { ownHalf++; out.push(cur); cur = []; return; }
+      if (onOwnHalf(s.cv.player_xy, landingOf(s))) { ownHalf++; out.push(cur); cur = []; return; }
       cur.push(s);
     });
     out.push(cur);
@@ -523,6 +522,7 @@ const StripPanel = ({ event, title, color }) => (
 );
 
 const inFilter = (e, filter) => filter === "all" ? true : filter === "pending" ? !e.annotation : !!e.annotation;
+const inMatch = (e, match) => match === "all" || e.match === match;
 
 // Who hit it: Claude's call once 1G has labelled the event, else the pipeline's (1E side + 1F shirt identity)
 const hitterOf = e => e.claude_label?.hitting_player ?? e.cv.hitting_player ?? 1;
@@ -546,6 +546,11 @@ const loadSaved = async () => {
     const old = await window.storage.get(LEGACY_STORAGE_KEY);
     if (old) return Object.fromEntries(Object.entries(JSON.parse(old.value)).map(([id, annotation]) => [id, { annotation }]));
   } catch {}
+  // A browser without the review (storage cleared, another port) picks it up from review.json on disk
+  try {
+    const res = await fetch("/review.json");
+    if (res.ok) return await res.json();
+  } catch {}
   return {};
 };
 
@@ -554,11 +559,21 @@ export default function BadmintonAnnotator() {
   const [events, setEvents] = useState([]);
   const [idx, setIdx] = useState(0);
   const [filter, setFilter] = useState("all"); // all | pending | done
+  const [match, setMatch] = useState("all");   // "all" or one match's name: review one match at a time
   const [showExport, setShowExport] = useState(false);
   const [editLanding, setEditLanding] = useState(false); // L: click the court to move the landing
   const containerRef = useRef(null);
   const [csvSaved, setCsvSaved] = useState(null); // result of the last write to disk
   const saveQueue = useRef(Promise.resolve());
+  // Another tab saved the review: this one's copy is out of date, so it stops saving (to the browser and to disk)
+  // rather than overwrite that work. A tab left open from an earlier session once rewrote annotations.csv this way
+  const [stale, setStale] = useState(false);
+  const staleRef = useRef(false);
+  useEffect(() => {
+    const onStorage = e => { if (e.key?.includes(STORAGE_KEY)) { staleRef.current = true; setStale(true); } };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Events from the pipeline (mock ones without it), with the saved review applied by id
   useEffect(() => {
@@ -574,10 +589,12 @@ export default function BadmintonAnnotator() {
         if (p) pos = JSON.parse(p.value);
       } catch {}
       const f = pos?.filter ?? "all";
-      const list = loaded.filter(e => inFilter(e, f));
+      const m = pos?.match && loaded.some(e => e.match === pos.match) ? pos.match : "all";
+      const list = loaded.filter(e => inFilter(e, f) && inMatch(e, m));
       let i = pos ? list.findIndex(e => e.id === pos.id) : -1;
       if (i < 0) i = Math.max(0, list.findIndex(e => !e.annotation));
       setFilter(f);
+      setMatch(m);
       setIdx(i);
       setEvents(loaded);
     })();
@@ -585,13 +602,26 @@ export default function BadmintonAnnotator() {
 
   // Save the review on change
   useEffect(() => {
-    if (events.length === 0) return;
+    if (events.length === 0 || staleRef.current) return;
     const review = Object.fromEntries(events.filter(e => e.annotation || e.gap_before || e.landing_fix)
       .map(e => [e.id, { annotation: e.annotation, gap_before: e.gap_before || undefined, landing_fix: e.landing_fix || undefined }]));
-    (async () => { try { await window.storage.set(STORAGE_KEY, JSON.stringify(review)); } catch {} })();
+    const json = JSON.stringify(review);
+    (async () => { try { await window.storage.set(STORAGE_KEY, json); } catch {} })();
+    // ...and to review.json on disk (dev server only), queued with the CSV writes. Never an empty review over it
+    if (Object.keys(review).length) {
+      saveQueue.current = saveQueue.current.then(() =>
+        fetch("/api/review.json", { method: "PUT", headers: { "Content-Type": "application/json" }, body: json }).catch(() => {}));
+    }
   }, [events]);
 
-  const filtered = events.filter(e => inFilter(e, filter));
+  const filtered = events.filter(e => inFilter(e, filter) && inMatch(e, match));
+  const matchNames = useMemo(() => [...new Set(events.map(e => e.match))], [events.length]);
+  // Picking a match goes to its first shot not reviewed yet
+  const chooseMatch = m => {
+    setMatch(m);
+    const list = events.filter(e => inFilter(e, filter) && inMatch(e, m));
+    setIdx(Math.max(0, list.findIndex(e => !e.annotation)));
+  };
   const current = filtered[idx];
   // The court shows your landing when you've moved it (same object while the event is unchanged, so a drag isn't reset)
   const shownCv = useMemo(() => current && (current.landing_fix ? { ...current.cv, landing_xy: current.landing_fix } : current.cv), [current]);
@@ -599,9 +629,9 @@ export default function BadmintonAnnotator() {
   const nextEvent = useMemo(() => current && events
     .filter(e => e.match === current.match && e.rally === current.rally && e.shot_num > current.shot_num)
     .sort((a, b) => a.shot_num - b.shot_num)[0], [current, events]);
-  // A landing on the hitter's own half: impossible for a returned shot ("returned"), and on the rally's last
-  // shot only right if it went into the net ("last"). The landing checked is yours, else the one passed on
-  // from a next shot marked not a shot, else the pipeline's
+  // A landing on the hitter's own half, never accepted ("returned" when a shot follows, "last" on the rally's
+  // last shot). The landing checked is yours, else the one passed on from a next shot marked not a shot, else
+  // the pipeline's
   const landingProblem = useMemo(() => {
     if (!current?.cv?.player_xy || current.annotation?.not_shot) return null;
     const passedOn = nextEvent?.annotation?.not_shot ? (nextEvent.landing_fix ?? nextEvent.cv.landing_xy) : null;
@@ -612,8 +642,8 @@ export default function BadmintonAnnotator() {
   // Remember the event on screen and the filter, for the next load
   useEffect(() => {
     if (!current) return;
-    (async () => { try { await window.storage.set(POSITION_KEY, JSON.stringify({ id: current.id, filter })); } catch {} })();
-  }, [current?.id, filter]);
+    (async () => { try { await window.storage.set(POSITION_KEY, JSON.stringify({ id: current.id, filter, match })); } catch {} })();
+  }, [current?.id, filter, match]);
   // The 3D court previews the human label once set, otherwise the suggestion
   const shownShot = current && (current.annotation?.shot_type || suggestionOf(current)?.shot_type);
 
@@ -664,21 +694,24 @@ export default function BadmintonAnnotator() {
     if (el) { el.focus(); }
   }, [idx, filter]);
 
+  // Agreement is your label against the suggestion the event has now, whichever key entered it: counting only
+  // Enter-confirmed labels scored every label made before the suggestions existed as a correction
+  const withSuggestion = events.filter(e => e.annotation && !e.annotation.not_shot && suggestionOf(e));
+  const agreed = withSuggestion.filter(e => e.annotation.shot_type === suggestionOf(e).shot_type).length;
   const stats = {
     total: events.length,
     done: events.filter(e => e.annotation).length,
-    confirmed: events.filter(e => e.annotation?.confirmed).length,
-    corrected: events.filter(e => e.annotation?.corrected).length,
+    confirmed: agreed,
+    corrected: withSuggestion.length - agreed,
     notShots: events.filter(e => e.annotation?.not_shot).length,
   };
-  const labelled = stats.confirmed + stats.corrected; // Claude's accuracy counts real shots only
-  const accuracy = labelled > 0 ? ((stats.confirmed / labelled) * 100).toFixed(1) : "—";
+  const accuracy = withSuggestion.length > 0 ? ((agreed / withSuggestion.length) * 100).toFixed(1) : "—";
 
   const predictorCsv = useMemo(() => toPredictorCsv(events), [events]);
 
   // Write the CSV to disk through the dev server (see vite.config.js); chained so writes land in order
   useEffect(() => {
-    if (events.length === 0) return;
+    if (events.length === 0 || staleRef.current) return;
     const { csv } = predictorCsv;
     saveQueue.current = saveQueue.current.then(async () => {
       try {
@@ -697,11 +730,18 @@ export default function BadmintonAnnotator() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  // Clears the whole review, in the browser and in review.json on disk (the dev server copies the old file to
+  // review.<time>.json first); annotations.csv follows from the empty review. The one save of an empty review
   const resetAll = async () => {
+    if (staleRef.current) return;
+    if (!window.confirm("Clear every annotation? review.json is copied to review.<time>.json first.")) return;
     const base = await loadEvents();
     setEvents(base.map(e => ({ ...e, annotation: null, gap_before: false, landing_fix: null })));
+    setFilter("all");
     setIdx(0);
     try { await window.storage.set(STORAGE_KEY, "{}"); } catch {}
+    saveQueue.current = saveQueue.current.then(() =>
+      fetch("/api/review.json", { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {}));
   };
 
   if (events.length === 0) return <div style={{color:"#94a3b8",padding:40,textAlign:"center",fontFamily:"system-ui"}}>Loading...</div>;
@@ -734,10 +774,10 @@ export default function BadmintonAnnotator() {
         </div>
         <div style={{ display:"flex", gap:16, fontSize:12, color:"#94a3b8", flexShrink:0 }}>
           <span><b style={{color:"#f1f5f9"}}>{stats.done}</b>/{stats.total}</span>
-          <span style={{color:"#34d399"}}>✓ {stats.confirmed}</span>
-          <span style={{color:"#fb923c"}}>✎ {stats.corrected}</span>
+          <span style={{color:"#34d399"}} title="your label matches the suggestion">✓ {stats.confirmed}</span>
+          <span style={{color:"#fb923c"}} title="your label differs from the suggestion">✎ {stats.corrected}</span>
           <span style={{color:"#f87171"}} title="not a shot">✗ {stats.notShots}</span>
-          <span>Claude acc: <b style={{color: Number(accuracy) > 80 ? "#34d399" : "#fbbf24"}}>{accuracy}%</b></span>
+          <span title="share of your labels that match the suggestion shown, however they were entered">Suggestion agreement: <b style={{color: Number(accuracy) > 80 ? "#34d399" : "#fbbf24"}}>{accuracy}%</b></span>
         </div>
       </div>
 
@@ -750,6 +790,21 @@ export default function BadmintonAnnotator() {
             {label} ({key==="all" ? events.length : key==="pending" ? events.filter(e=>!e.annotation).length : stats.done})
           </button>
         ))}
+        {/* One match at a time; a match with a player outside the predictor's 35 is reviewed but never exported */}
+        <select value={match} onChange={e => chooseMatch(e.target.value)}
+          style={{ marginLeft:8, padding:"6px 8px", fontSize:12, borderRadius:6, border:"1px solid #334155", background:"#1e293b", color:"#e2e8f0", minWidth:0, maxWidth:"100%" }}>
+          <option value="all">All matches</option>
+          {matchNames.map(name => {
+            const evs = events.filter(e => e.match === name);
+            const known = new Set(Object.keys(PLAYER_IDS).map(playerKey));
+            const exported = evs[0].players.every(p => known.has(playerKey(p)));
+            return (
+              <option key={name} value={name}>
+                {name} · {evs.filter(e => e.annotation).length}/{evs.length}{exported ? "" : " · not exported"}
+              </option>
+            );
+          })}
+        </select>
       </div>
 
       {/* Export modal */}
@@ -764,7 +819,7 @@ export default function BadmintonAnnotator() {
           </div>
           <div style={{ fontSize:11, color:"#64748b", marginBottom:8, lineHeight:1.6 }}>
             <div>{predictorCsv.rallies} rallies · {predictorCsv.shots} shots, from {predictorCsv.reviewed} fully reviewed rallies. Rallies with unreviewed shots are held back.</div>
-            <div>{predictorCsv.notShots} false hits dropped, and {predictorCsv.ownHalf} returned shots landing on their own half left out (fix them with L or X). Rallies are split where a shot is missing, and {predictorCsv.short} pieces under {MIN_PIECE_SHOTS} shots left out (the predictor never scores a rally's first 3 shots).</div>
+            <div>{predictorCsv.notShots} false hits dropped, and {predictorCsv.ownHalf} shots landing on their own half left out (fix them with L or X). Rallies are split where a shot is missing, and {predictorCsv.short} pieces under {MIN_PIECE_SHOTS} shots left out (the predictor never scores a rally's first 3 shots).</div>
             <div>{csvSaved?.ok ? <>Auto-saved to <code>{csvSaved.path}</code></> : "Auto-save needs the Vite dev server (npm run dev); use Download instead."}</div>
             {predictorCsv.unknownPlayers.length > 0 && (
               <div style={{ color:"#fbbf24" }}>
@@ -810,13 +865,25 @@ export default function BadmintonAnnotator() {
 
           {/* Right: this shot's contact, the next one's (where it went), then labels + controls */}
           <div>
-            <StripPanel event={current} color="#60a5fa"
-              title={`This shot · S${current.shot_num} · ${current.players[hitterOf(current) - 1]}`} />
-            {nextEvent ? (
-              <StripPanel event={nextEvent} color="#a78bfa"
+            {stale && (
+              <div style={{ background:"#3b1414", borderRadius:8, padding:"8px 10px", marginBottom:8, border:"1px solid #b91c1c", fontSize:12, color:"#fca5a5",
+                display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                <span>The review was changed in another tab, so this tab has stopped saving. Reload to continue here.</span>
+                <button onClick={() => window.location.reload()} style={{ ...btnStyle("#7f1d1d"), color:"#fff", flexShrink:0 }}>Reload</button>
+              </div>
+            )}
+            {/* The match's first-named player's row always on top, the other player's below: the shot being labelled
+                sits on its hitter's row, the next shot (or, after a rally's last shot, the court a moment later) on the other */}
+            {(() => {
+            const thisShot = (
+              <StripPanel key="this" event={current} color="#60a5fa"
+                title={`This shot · S${current.shot_num} · ${current.players[hitterOf(current) - 1]}`} />
+            );
+            const other = nextEvent ? (
+              <StripPanel key="next" event={nextEvent} color="#a78bfa"
                 title={`Next shot · S${nextEvent.shot_num} · ${nextEvent.players[hitterOf(nextEvent) - 1]}: where this shot went${nextEvent.annotation?.not_shot ? " (marked not a shot)" : ""}`} />
             ) : (
-              <div>
+              <div key="after">
                 {/* No next hit shows where the last shot went, so 1F shows the court 0.5, 1 and 1.5 s after it */}
                 {current.frames_after && (
                   <div style={{ marginBottom:4 }}>
@@ -830,12 +897,12 @@ export default function BadmintonAnnotator() {
                     : current.cv.landing_source === "track_end" ? "where the shuttle's track ends (rough)" : "from the pipeline"}.
                 </div>
               </div>
-            )}
-
-            {/* The suggestion: Claude's label (Phase 1G) if there is one, else the ShuttleSet classifier's */}
-            {current.claude_label ? (
-              <div style={{ background:"#1e293b", borderRadius:8, padding:"8px 12px", marginBottom:8, border:"1px solid #334155" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+            );
+            // The suggestion sits between the two strips, so the frames and the label read in one glance:
+            // Claude's label (Phase 1G) if there is one, else the ShuttleSet classifier's
+            const suggestion = current.claude_label ? (
+              <div key="suggestion" style={{ background:"#1e293b", borderRadius:8, padding:"8px 12px", marginBottom:8, border:"1px solid #334155", textAlign:"center" }}>
+                <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:8, marginBottom:4 }}>
                   <span style={{ fontSize:11, color:"#64748b", fontWeight:600 }}>CLAUDE LABEL</span>
                   <span style={{ fontSize:10, padding:"2px 8px", borderRadius:10,
                     background: current.claude_label.confidence === "high" ? "#166534" : "#854d0e",
@@ -848,8 +915,8 @@ export default function BadmintonAnnotator() {
                 <div style={{ fontSize:11, color:"#94a3b8", lineHeight:1.5 }}>{current.claude_label.reasoning}</div>
               </div>
             ) : current.model_label ? (
-              <div style={{ background:"#1e293b", borderRadius:8, padding:"8px 12px", marginBottom:8, border:"1px solid #334155" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+              <div key="suggestion" style={{ background:"#1e293b", borderRadius:8, padding:"8px 12px", marginBottom:8, border:"1px solid #334155", textAlign:"center" }}>
+                <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:8, marginBottom:4 }}>
                   <span style={{ fontSize:11, color:"#64748b", fontWeight:600 }}>CLASSIFIER SUGGESTION</span>
                   <span style={{ fontSize:10, padding:"2px 8px", borderRadius:10,
                     background: current.model_label.p >= CONFIDENT_P ? "#166534" : "#854d0e",
@@ -865,10 +932,12 @@ export default function BadmintonAnnotator() {
                 </div>
               </div>
             ) : (
-              <div style={{ background:"#1e293b", borderRadius:8, padding:"8px 12px", marginBottom:8, border:"1px dashed #334155", fontSize:12, color:"#94a3b8" }}>
+              <div key="suggestion" style={{ background:"#1e293b", borderRadius:8, padding:"8px 12px", marginBottom:8, border:"1px dashed #334155", fontSize:12, color:"#94a3b8", textAlign:"center" }}>
                 No suggestion yet (run pipeline/shot_classify.py label). Hit by <b style={{ color:"#e2e8f0" }}>{current.players[hitterOf(current) - 1]}</b>; pick the shot type with 1–0.
               </div>
-            )}
+            );
+            return hitterOf(current) === 1 ? [thisShot, suggestion, other] : [other, suggestion, thisShot];
+            })()}
 
             {current.gap_before && (
               <div style={{ background:"#1e1b3a", borderRadius:8, padding:"6px 10px", marginBottom:8, border:"1px solid #7c3aed", fontSize:12, color:"#c4b5fd" }}>
@@ -876,13 +945,12 @@ export default function BadmintonAnnotator() {
               </div>
             )}
 
-            {landingProblem === "returned" ? (
+            {landingProblem && (
               <div style={{ background:"#3b1414", borderRadius:8, padding:"6px 10px", marginBottom:8, border:"1px solid #b91c1c", fontSize:12, color:"#fca5a5" }}>
-                ⚠ Lands on the hitter's own half, which a returned shot can't: this shot or the next is a false hit (X on it), or the landing is wrong (L to move it). The export leaves this shot out until it's fixed.
-              </div>
-            ) : landingProblem === "last" && (
-              <div style={{ background:"#1e293b", borderRadius:8, padding:"6px 10px", marginBottom:8, border:"1px solid #854d0e", fontSize:12, color:"#fbbf24" }}>
-                Lands on the hitter's own half: only right if the shot went into the net. Otherwise move it with L.
+                {landingProblem === "returned"
+                  ? "⚠ Lands on the hitter's own half, which a returned shot can't: this shot or the next is a false hit (X on it), or the landing is wrong (L to move it)."
+                  : "⚠ The rally's last shot lands on the hitter's own half: move the landing to where it came down (L), or mark a false hit (X)."}
+                {" "}The export leaves this shot out until it's fixed.
               </div>
             )}
 
