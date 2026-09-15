@@ -37,6 +37,18 @@ The stage names (1A to 1G) are used throughout the scripts and docs. [pipeline/R
 | 1F Events | `feature_assemble.py` | Builds one event per hit: both players' positions, where the shot went, its speed and launch angle, timings, and cropped frame strips. Tells the two players apart by shirt colour. | Landing a median 1.0-1.1 m from ShuttleSet's; player names right at 97.8-98.6% of hits |
 | 1G Suggestions | `shot_classify.py` | A gradient-boosted classifier trained on ShuttleSet's own 29,494 labelled shots suggests each event's shot type. | On the pipeline's events: 70-74% first guess, 92% in its top 3 |
 
+### What tracking and hit detection look like
+
+Both charts show the same rally: clip 35 of Carolina Marín vs An Se Young (Thailand Open 2021 semi-final), one of the ShuttleSet matches held out from tuning, so ShuttleSet's hand-labelled hits can be drawn alongside. It's a typical rally, not a best case: 1D found 15 of its 19 labelled hits within ±2 frames (79%, the same as the match overall). The charts come from `shuttle_track.py plot` and `contact_detect.py plot`; they show positions on screen, not video frames.
+
+**Shuttle tracking (1C).** The shuttle's position on screen through the rally: TrackNetV3's detections (grey), the ones cleaning dropped as its "stuck point" artifact or as one-frame spikes (red ×), and the cleaned, gap-filled, smoothed track that hit detection reads (blue). Shaded stretches have no track. In the first 1.7 s, before the shuttle is in view, TrackNetV3 reports its fixed stuck point, and cleaning drops all of it. Each rise and fall in *y* after that is one shot's flight.
+
+![Shuttle track through one rally: raw TrackNetV3 detections, dropped points and the cleaned track](docs/images/shuttle_tracking.png)
+
+**Hit detection (1D).** The same track by frame, split into flights (blue and orange alternate): each flight is one curve fitted with a drag model, and the cuts between them where the velocity jumps are the detected hits (red lines). ShuttleSet's hand-labelled hits are the green bands. Most red lines sit on a green band. The misses are green bands with no red line. The last two red lines come after ShuttleSet's final hit, as the shuttle comes down: false hits, the kind the reviewer marks with X.
+
+![Hit detection on the same rally: fitted flights, detected hits and ShuttleSet's labelled hits](docs/images/hit_detection.png)
+
 ### A few ideas that run through it
 
 - **Everything is in court coordinates.** 1B's homography maps any floor point in the image to metres on the court (X across, Y along, net at 0). It only maps floor points, so players are placed by their feet, and a shuttle's position counts only when it touches the floor. An airborne shuttle projects to wherever the camera's line of sight meets the floor.

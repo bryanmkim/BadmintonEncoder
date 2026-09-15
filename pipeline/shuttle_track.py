@@ -9,6 +9,7 @@ turns its raw per-frame detections into cleaned, court-referenced tracks.
   .venv/bin/python shuttle_track.py ingest <tracknet_output.zip>   # raw tracks -> segments/<match>/tracks/raw/
   .venv/bin/python shuttle_track.py process                        # clean every raw track and write the gate report
   .venv/bin/python shuttle_track.py overlay --match <id> --segment <n>   # clip with the track drawn, plus a still sheet
+  .venv/bin/python shuttle_track.py plot --match <id> --segment <n>      # chart of raw vs cleaned track (no video frames)
 """
 import argparse
 import csv
@@ -310,6 +311,42 @@ def overlay(match, segment, trail=12, stills=8):
     log(f"overlay -> {out}  (stills -> {out.with_suffix('.png').name})")
 
 
+def plot(match, segment):
+    """The clip's track over time: TrackNetV3's raw detections, the ones cleaning dropped (stuck points and
+    spikes), and the cleaned, gap-filled, smoothed track 1D reads, with frames that have no track shaded. A chart
+    only, with no video frames, so unlike the overlay it can go in the docs."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    d = SEG_DIR / match
+    row = next(r for r in read_rows(d) if int(r["segment_id"]) == segment)
+    xy, detected, _ = read_track(d / "tracks" / row["file"].replace(".mp4", ".csv"))
+    raw_detected, raw_xy = read_raw(d / "tracks" / "raw" / row["file"].replace(".mp4", "_ball.csv"), len(xy))
+    fps = json.loads((d / "match.json").read_text())["fps"]
+    t = np.arange(len(xy)) / fps
+    kept, dropped = raw_detected & detected, raw_detected & ~detected
+    missing = ~np.isfinite(xy[:, 0])
+    edges = np.flatnonzero(np.diff(np.r_[0, missing.astype(int), 0]))
+    fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+    for ax, k, name in zip(axes, (0, 1), ("x (px)", "y (px, down)")):
+        for a, b in zip(edges[::2], edges[1::2]):
+            ax.axvspan(t[a], t[min(b, len(t) - 1)], color="#fee2e2", lw=0)
+        ax.plot(t[kept], raw_xy[kept, k], ".", ms=3, color="#94a3b8", label="TrackNetV3 detection")
+        ax.plot(t[dropped], raw_xy[dropped, k], "x", ms=4, color="#dc2626", label="dropped: stuck point or spike")
+        ax.plot(t, xy[:, k], lw=1.4, color="#2563eb", label="cleaned, gap-filled, smoothed")
+        ax.set_ylabel(name)
+        ax.grid(alpha=0.3)
+    axes[1].invert_yaxis()
+    axes[1].set_xlabel("time in clip (s)   ·   shaded = no track")
+    axes[0].legend(loc="upper right", fontsize=8, ncol=3)
+    axes[0].set_title(f"{match} #{segment}: shuttle position on screen")
+    out = d / "tracks" / f"plot_{row['file'].replace('.mp4', '.png')}"
+    fig.tight_layout()
+    fig.savefig(out, dpi=100)
+    plt.close(fig)
+    log(f"plot -> {out}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -318,9 +355,10 @@ if __name__ == "__main__":
     p.add_argument("--match", action="append", help="only this match (repeatable)")
     sub.add_parser("ingest").add_argument("zip", type=Path)
     sub.add_parser("process")
-    o = sub.add_parser("overlay")
-    o.add_argument("--match", required=True)
-    o.add_argument("--segment", type=int, required=True)
+    for name in ("overlay", "plot"):
+        o = sub.add_parser(name)
+        o.add_argument("--match", required=True)
+        o.add_argument("--segment", type=int, required=True)
     args = ap.parse_args()
     if args.cmd == "pack":
         pack(args.full_size, args.match)
@@ -328,5 +366,7 @@ if __name__ == "__main__":
         ingest(args.zip)
     elif args.cmd == "process":
         process()
+    elif args.cmd == "plot":
+        plot(args.match, args.segment)
     else:
         overlay(args.match, args.segment)

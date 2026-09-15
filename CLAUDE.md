@@ -31,7 +31,7 @@ cd pipeline
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # also needs ffmpeg, and node on PATH for yt-dlp
 .venv/bin/python video_prep.py [--match <id>] [--force] [--keep-raw] [--resegment] [--spot-check N]   # 1A
 .venv/bin/python court_calibrate.py [--match <id>] [--click]                                         # 1B
-.venv/bin/python shuttle_track.py pack|ingest <zip>|process|overlay --match <id> --segment <n>       # 1C
+.venv/bin/python shuttle_track.py pack|ingest <zip>|process|overlay|plot --match <id> --segment <n>  # 1C (plot: chart, no video frames)
 .venv/bin/python contact_detect.py labels|detect|evaluate|plot --match <id> --segment <n>            # 1D
 .venv/bin/python contact_review.py queue [--add]|review|summary                                      # 1D hand review (OpenCV window)
 .venv/bin/python player_detect.py detect|evaluate|sheet --match <id> --segment <n>                   # 1E

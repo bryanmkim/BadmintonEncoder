@@ -101,6 +101,7 @@ TrackNetV3 runs on a Colab GPU; everything else runs locally.
 3. Open [colab/tracknet_colab.ipynb](colab/tracknet_colab.ipynb) in Colab (File → Upload notebook), set the runtime to a T4 GPU and run all. Set `LIMIT = 3` first for a trial run to see how long a clip takes. Each clip's result is saved to `badminton-tracknet/output/` as it finishes, so a disconnected session resumes where it stopped. The last cell zips everything to `tracknet_output.zip`.
 4. `.venv/bin/python shuttle_track.py ingest ~/Downloads/tracknet_output.zip`, then `.venv/bin/python shuttle_track.py process`.
 5. `.venv/bin/python shuttle_track.py overlay --match <id> --segment <n>` writes the clip with its track drawn on it, plus a sheet of stills, for the eye check. Every frame is stamped with its number, and once 1D has run each detected contact is marked on its own frame (red ring and `HIT n`), so stepping frame by frame (QuickTime: pause, then ← / →) checks each one.
+6. `.venv/bin/python shuttle_track.py plot --match <id> --segment <n>` writes `tracks/plot_seg_NNNN.png`, a chart of the clip's track over time: TrackNetV3's raw detections, the ones cleaning dropped (stuck points and spikes), and the cleaned track. It has no video frames, so unlike the overlay it can be shared; the root README's tracking figure comes from it.
 
 The notebook runs TrackNetV3's own `predict.py` (TrackNet + InpaintNet, temporal-ensemble mode, streaming frames with `--large_video`) at pinned commit `6eda442`, with three workarounds:
 
