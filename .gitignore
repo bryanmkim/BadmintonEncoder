@@ -1,7 +1,15 @@
 # Dependencies
 node_modules/
 pipeline/.venv/
-CLAUDE.MD
+
+# Local notes for Claude Code
+CLAUDE.md
+
+# Model weights: ultralytics downloads YOLO weights on first use (and they're AGPL-3.0)
+*.pt
+
+# The annotator's Reset copies the old review to review.<time>.json; review.json itself is tracked
+review.*.json
 
 # Build output
 dist/
