@@ -1,5 +1,15 @@
 # BadmintonEncoder
 
+## TL;DR
+
+- **What:** turns BWF broadcast video into shot-by-shot rally data (who hit it, the shot type, where it landed), in exactly the format [BadmintonShotPredictor](#related-projects) trains on.
+- **How:** a Python pipeline measures everything from the video: main-camera clips, court calibration, shuttle tracking with TrackNetV3, hit detection, player pose, and one event per shot with positions, landing, speed and frames.
+- **Labelling:** a classifier trained on ShuttleSet suggests each shot type (70-74% right first time, 92% in its top 3), and a person confirms or corrects every shot in a keyboard-driven React app, at about 1,100 shots an hour.
+- **First result:** trained only on 24 labelled rally pieces, the predictor scores 44.5% on ShuttleSet's validation games, against 38.9% for the same amount of ShuttleSet data. The labels hold up; the amount of data is what limits it.
+- **Run it:** `npm run dev` for the annotator; the pipeline scripts are in [`pipeline/`](pipeline/) ([how to run](#running-it)).
+
+## Overview
+
 Turns broadcast badminton video into shot-by-shot rally data: for every shot, who hit it, what kind of shot it was and where it went. The output is training data for [BadmintonShotPredictor](#related-projects), a small transformer that predicts the next shot in a rally.
 
 The predictor was built on [ShuttleSet](https://github.com/wywyWang/CoachAI-Projects/tree/main/ShuttleSet), a hand-labelled dataset of 44 BWF matches. Labelling a match by hand, frame by frame, takes hours, which caps how much data there can ever be. This project does most of that work from the video. A pipeline finds each hit, where both players stand, where the shuttle lands and how fast it travels, and suggests a shot type. A person then confirms or corrects each shot in a keyboard-driven review app, which exports the rallies in exactly the format the predictor trains on.
